@@ -1,0 +1,8 @@
+{
+  "name": "Shree Adishakti Solar",
+  "description": "Premium 3D Interactive Solar Energy Experience for Shree Adishakti Solar Pvt. Ltd. with dynamic animations, AI calculator, and live tracker.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
