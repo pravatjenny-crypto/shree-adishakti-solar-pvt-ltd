@@ -52,6 +52,7 @@ import {
 import { BRANDS, PRODUCTS, FAQS, PROJECT_GALLERY } from "./data";
 import { Lead, Survey, ChatMessage } from "./types";
 import Logo from "./components/Logo";
+import { saveProjectToFirebase, fetchProjectsFromFirebase } from "./lib/firebase";
 
 const EXECUTION_STEPS = [
   {
@@ -262,13 +263,34 @@ export default function App() {
     };
 
     try {
-      const res = await fetch("/api/projects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newProject)
-      });
+      // Direct Client-side save to Firebase Firestore & Storage!
+      await saveProjectToFirebase(newProject);
+      await fetchProjects();
+      setFormStatus("success");
+      setFormErrorMsg("");
       
-      if (res.ok) {
+      // Reset Form fields
+      setNewReviewName("");
+      setNewReviewLocation("");
+      setNewReviewFeedback("");
+      setNewReviewImage(null);
+      setNewReviewRating(5);
+      setNewReviewCategory("Residential");
+      setNewReviewCapacity("3 kW System");
+    } catch (err: any) {
+      console.error("Error submitting project to Firebase:", err);
+      // Fail-safe fallback to LocalStorage if any network errors occur
+      try {
+        const localStored = localStorage.getItem("sas_custom_projects");
+        const customProjects = localStored ? JSON.parse(localStored) : [];
+        const localNewProject = {
+          id: `project_${Date.now()}`,
+          createdAt: new Date().toISOString(),
+          ...newProject
+        };
+        customProjects.unshift(localNewProject);
+        localStorage.setItem("sas_custom_projects", JSON.stringify(customProjects));
+        
         await fetchProjects();
         setFormStatus("success");
         setFormErrorMsg("");
@@ -281,36 +303,9 @@ export default function App() {
         setNewReviewRating(5);
         setNewReviewCategory("Residential");
         setNewReviewCapacity("3 kW System");
-      } else {
-        const errorText = await res.text().catch(() => "");
-        let errorMsg = `HTTP Error ${res.status}`;
-        try {
-          const parsed = JSON.parse(errorText);
-          if (parsed.error) {
-            errorMsg += `: ${parsed.error}`;
-          }
-        } catch {
-          if (errorText) {
-            errorMsg += `: ${errorText.substring(0, 100)}`;
-          }
-        }
-        setFormErrorMsg(errorMsg || "Failed to save project/feedback to server database.");
+      } catch (innerErr) {
+        setFormErrorMsg(`Failed to save project: ${err.message || String(err)}`);
       }
-    } catch (err: any) {
-      console.error(err);
-      // Fallback to local state if server fails or network is off
-      setLocalProjects([newProject, ...localProjects]);
-      setFormStatus("success");
-      setFormErrorMsg("");
-      
-      // Reset Form fields
-      setNewReviewName("");
-      setNewReviewLocation("");
-      setNewReviewFeedback("");
-      setNewReviewImage(null);
-      setNewReviewRating(5);
-      setNewReviewCategory("Residential");
-      setNewReviewCapacity("3 kW System");
     }
     
     setTimeout(() => {
@@ -497,14 +492,29 @@ export default function App() {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch("/api/projects");
-      if (res.ok) {
-        const customProjects = await res.json();
-        // Merge custom user-uploaded projects at the top of the static PROJECT_GALLERY
-        setLocalProjects([...customProjects, ...PROJECT_GALLERY]);
+      // Fetch directly from Firebase Firestore Cloud!
+      let customProjects = await fetchProjectsFromFirebase();
+      
+      // If Firestore database has no custom records yet, look for local storage fallback
+      if (customProjects.length === 0) {
+        const localStored = localStorage.getItem("sas_custom_projects");
+        if (localStored) {
+          customProjects = JSON.parse(localStored);
+        }
       }
+      
+      // Merge custom user-uploaded projects at the top of the static PROJECT_GALLERY
+      setLocalProjects([...customProjects, ...PROJECT_GALLERY]);
     } catch (err) {
-      console.warn("Could not load database records for custom project uploads.");
+      console.warn("Could not load Firebase database records for custom project uploads.", err);
+      // Fail-safe load local storage on total failure
+      try {
+        const localStored = localStorage.getItem("sas_custom_projects");
+        if (localStored) {
+          const customProjects = JSON.parse(localStored);
+          setLocalProjects([...customProjects, ...PROJECT_GALLERY]);
+        }
+      } catch (_) {}
     }
   };
 
@@ -3141,6 +3151,11 @@ export default function App() {
                 <p className="text-xs text-slate-500">
                   Are you an existing customer? Have you completed a solar project with us? Submit your system image, coordinates, and feedback to display your verified savings certificate!
                 </p>
+                <div className="pt-1 flex justify-center">
+                  <span className="inline-flex items-center gap-1 py-0.5 px-2 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-800 border border-emerald-200/50">
+                    <Database size={10} className="text-emerald-600" /> Firebase Firestore Cloud Connected
+                  </span>
+                </div>
               </div>
 
               {/* Form Status Messages */}
