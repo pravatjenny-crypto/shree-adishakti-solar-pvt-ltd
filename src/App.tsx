@@ -236,7 +236,7 @@ export default function App() {
     }
   };
 
-  const handleAddProject = (e: React.FormEvent) => {
+  const handleAddProject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newReviewName.trim() || !newReviewLocation.trim() || !newReviewFeedback.trim()) {
       setFormErrorMsg("Please fill in all fields (Name, Location, and Review/Feedback).");
@@ -261,18 +261,46 @@ export default function App() {
       feedback: newReviewFeedback
     };
 
-    setLocalProjects([newProject, ...localProjects]);
-    setFormStatus("success");
-    setFormErrorMsg("");
-    
-    // Reset Form fields
-    setNewReviewName("");
-    setNewReviewLocation("");
-    setNewReviewFeedback("");
-    setNewReviewImage(null);
-    setNewReviewRating(5);
-    setNewReviewCategory("Residential");
-    setNewReviewCapacity("3 kW System");
+    try {
+      const res = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newProject)
+      });
+      
+      if (res.ok) {
+        await fetchProjects();
+        setFormStatus("success");
+        setFormErrorMsg("");
+        
+        // Reset Form fields
+        setNewReviewName("");
+        setNewReviewLocation("");
+        setNewReviewFeedback("");
+        setNewReviewImage(null);
+        setNewReviewRating(5);
+        setNewReviewCategory("Residential");
+        setNewReviewCapacity("3 kW System");
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        setFormErrorMsg(errorData.error || "Failed to save project/feedback to server database.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      // Fallback to local state if server fails or network is off
+      setLocalProjects([newProject, ...localProjects]);
+      setFormStatus("success");
+      setFormErrorMsg("");
+      
+      // Reset Form fields
+      setNewReviewName("");
+      setNewReviewLocation("");
+      setNewReviewFeedback("");
+      setNewReviewImage(null);
+      setNewReviewRating(5);
+      setNewReviewCategory("Residential");
+      setNewReviewCapacity("3 kW System");
+    }
     
     setTimeout(() => {
       setFormStatus("idle");
@@ -450,10 +478,24 @@ export default function App() {
 
 
 
-  // Fetch leads and surveys for simulated live experience
+  // Fetch leads, surveys, and custom user projects for persistent experience
   useEffect(() => {
     fetchLeadsAndSurveys();
+    fetchProjects();
   }, []);
+
+  const fetchProjects = async () => {
+    try {
+      const res = await fetch("/api/projects");
+      if (res.ok) {
+        const customProjects = await res.json();
+        // Merge custom user-uploaded projects at the top of the static PROJECT_GALLERY
+        setLocalProjects([...customProjects, ...PROJECT_GALLERY]);
+      }
+    } catch (err) {
+      console.warn("Could not load database records for custom project uploads.");
+    }
+  };
 
   const fetchLeadsAndSurveys = async () => {
     try {

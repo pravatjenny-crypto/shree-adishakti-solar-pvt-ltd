@@ -161,7 +161,9 @@ async function sendSurveyEmail(survey: any) {
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+// Increase body parser limits to support base64 project image uploads up to 50MB
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // Initialize Gemini SDK lazily
 let ai: GoogleGenAI | null = null;
@@ -191,6 +193,7 @@ if (!fs.existsSync(DATA_DIR)) {
 
 const LEADS_FILE = path.join(DATA_DIR, "leads.json");
 const SURVEYS_FILE = path.join(DATA_DIR, "surveys.json");
+const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
 
 function readJsonFile<T>(filePath: string, defaultVal: T): T {
   try {
@@ -264,6 +267,24 @@ app.post("/api/surveys", async (req, res) => {
 app.get("/api/surveys", (req, res) => {
   const surveys = readJsonFile<any[]>(SURVEYS_FILE, []);
   res.json(surveys);
+});
+
+// Custom User Rooftop Projects / Reviews database endpoints
+app.get("/api/projects", (req, res) => {
+  const projects = readJsonFile<any[]>(PROJECTS_FILE, []);
+  res.json(projects);
+});
+
+app.post("/api/projects", (req, res) => {
+  const projects = readJsonFile<any[]>(PROJECTS_FILE, []);
+  const newProject = {
+    id: `project_${Date.now()}`,
+    createdAt: new Date().toISOString(),
+    ...req.body,
+  };
+  projects.push(newProject);
+  writeJsonFile(PROJECTS_FILE, projects);
+  res.status(201).json({ success: true, project: newProject });
 });
 
 // Update lead or survey status (Simulated CRM / Admin Panel)

@@ -16,40 +16,40 @@ export default function Logo({
   const isDark = variant === "dark";
 
   return (
-    <div className={`flex items-center space-x-3 select-none ${className}`}>
-      {/* Authentic Company Logo Image */}
-      <div className="relative shrink-0 w-11 h-11 rounded-full overflow-hidden border border-slate-200/60 bg-white shadow-sm transition-transform hover:scale-105 duration-300">
+    <div className={`flex items-center space-x-2.5 sm:space-x-3 select-none py-1 ${className}`}>
+      {/* Authentic Company Logo Image - Full, uncropped, contain-fit */}
+      <div className="shrink-0 flex items-center justify-center">
         <img
           src="/src/assets/images/shree_adishakti_solar_logo_1782724405534.jpg"
           alt="Shree Adishakti Solar"
-          className="w-full h-full object-cover"
+          className="h-[40px] xs:h-[45px] sm:h-[50px] md:h-[55px] lg:h-[60px] w-auto object-contain mix-blend-multiply transition-transform duration-300 hover:scale-[1.02]"
           referrerPolicy="no-referrer"
         />
       </div>
 
-      {/* Dynamic Brand Text Label matches the logo typography */}
+      {/* Restored Brand Text Label */}
       {showText && (
-        <div className="flex flex-col select-none">
-          <div className="flex items-center space-x-1.5">
+        <div className="flex flex-col select-none leading-none">
+          <div className="flex items-center space-x-1 sm:space-x-1.5">
             {/* Devanagari "श्री" prefix styled beautifully */}
-            <span className="text-[15px] font-black font-sans bg-slate-900 text-white px-1.5 py-0.5 rounded-md leading-none">
+            <span className="text-[11px] sm:text-[13px] md:text-[14px] font-black font-sans bg-slate-900 text-white px-1.5 py-0.5 rounded-md leading-none">
               श्री
             </span>
             <span
               className={`font-black font-display tracking-tight uppercase leading-none ${
                 isDark ? "text-white" : "text-slate-900"
               } ${
-                textSize === "sm" ? "text-sm" : textSize === "lg" ? "text-xl" : "text-base"
+                textSize === "sm" ? "text-xs sm:text-sm" : textSize === "lg" ? "text-lg sm:text-xl" : "text-sm sm:text-base md:text-lg"
               }`}
             >
               Adi Shakti <span className="text-[#F27D26]">Solar</span>
             </span>
           </div>
           <span
-            className={`font-mono font-bold uppercase tracking-widest mt-0.5 text-left leading-none ${
+            className={`font-mono font-bold uppercase tracking-widest mt-1 text-left leading-none ${
               isDark ? "text-slate-400" : "text-slate-500"
             } ${
-              textSize === "sm" ? "text-[8px]" : "text-[9px]"
+              textSize === "sm" ? "text-[7px]" : "text-[8px] sm:text-[9px]"
             }`}
           >
             PVT. LTD. — BHUBANESWAR
