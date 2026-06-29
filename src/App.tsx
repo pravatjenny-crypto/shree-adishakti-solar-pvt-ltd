@@ -52,6 +52,7 @@ import {
 import { BRANDS, PRODUCTS, FAQS, PROJECT_GALLERY } from "./data";
 import { Lead, Survey, ChatMessage } from "./types";
 import Logo from "./components/Logo";
+import { Analytics } from "@vercel/analytics/react";
 
 const EXECUTION_STEPS = [
   {
@@ -3935,6 +3936,7 @@ export default function App() {
         </div>
       </div>
 
+      <Analytics />
     </div>
   );
 }
