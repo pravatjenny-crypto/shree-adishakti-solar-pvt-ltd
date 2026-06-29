@@ -1,4 +1,6 @@
 import React from "react";
+// @ts-ignore
+import logoImg from "../assets/images/shree_adishakti_solar_logo_1782724405534.jpg";
 
 interface LogoProps {
   className?: string;
@@ -20,7 +22,7 @@ export default function Logo({
       {/* Authentic Company Logo Image - Full, uncropped, contain-fit */}
       <div className="shrink-0 flex items-center justify-center">
         <img
-          src="/src/assets/images/shree_adishakti_solar_logo_1782724405534.jpg"
+          src={logoImg}
           alt="Shree Adishakti Solar"
           className="h-[40px] xs:h-[45px] sm:h-[50px] md:h-[55px] lg:h-[60px] w-auto object-contain mix-blend-multiply transition-transform duration-300 hover:scale-[1.02]"
           referrerPolicy="no-referrer"

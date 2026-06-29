@@ -282,8 +282,19 @@ export default function App() {
         setNewReviewCategory("Residential");
         setNewReviewCapacity("3 kW System");
       } else {
-        const errorData = await res.json().catch(() => ({}));
-        setFormErrorMsg(errorData.error || "Failed to save project/feedback to server database.");
+        const errorText = await res.text().catch(() => "");
+        let errorMsg = `HTTP Error ${res.status}`;
+        try {
+          const parsed = JSON.parse(errorText);
+          if (parsed.error) {
+            errorMsg += `: ${parsed.error}`;
+          }
+        } catch {
+          if (errorText) {
+            errorMsg += `: ${errorText.substring(0, 100)}`;
+          }
+        }
+        setFormErrorMsg(errorMsg || "Failed to save project/feedback to server database.");
       }
     } catch (err: any) {
       console.error(err);

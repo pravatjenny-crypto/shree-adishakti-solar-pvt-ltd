@@ -276,15 +276,20 @@ app.get("/api/projects", (req, res) => {
 });
 
 app.post("/api/projects", (req, res) => {
-  const projects = readJsonFile<any[]>(PROJECTS_FILE, []);
-  const newProject = {
-    id: `project_${Date.now()}`,
-    createdAt: new Date().toISOString(),
-    ...req.body,
-  };
-  projects.push(newProject);
-  writeJsonFile(PROJECTS_FILE, projects);
-  res.status(201).json({ success: true, project: newProject });
+  try {
+    const projects = readJsonFile<any[]>(PROJECTS_FILE, []);
+    const newProject = {
+      id: `project_${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      ...req.body,
+    };
+    projects.push(newProject);
+    writeJsonFile(PROJECTS_FILE, projects);
+    res.status(201).json({ success: true, project: newProject });
+  } catch (err: any) {
+    console.error("Error saving project/feedback:", err);
+    res.status(500).json({ error: `Server failed to save project: ${err.message || String(err)}` });
+  }
 });
 
 // Update lead or survey status (Simulated CRM / Admin Panel)
