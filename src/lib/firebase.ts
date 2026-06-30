@@ -1,7 +1,8 @@
 /// <reference types="vite/client" />
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, addDoc, getDocs, query, orderBy, limit } from "firebase/firestore";
+import { getFirestore, collection, addDoc, getDocs, query, orderBy, limit, doc, updateDoc } from "firebase/firestore";
 import { getStorage, ref, uploadString, getDownloadURL } from "firebase/storage";
+import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from "firebase/auth";
 import config from "../../firebase-applet-config.json";
 
 // Initialize Firebase using the provisioned config
@@ -17,7 +18,7 @@ const firebaseConfig = {
 export const app = initializeApp(firebaseConfig);
 
 // Initialize Firestore with the custom databaseId provided in config
-export const db = getFirestore(app, config.firestoreDatabaseId || "(default)");
+export const db = getFirestore(app, (config as any).firestoreDatabaseId || "(default)");
 
 // Initialize Storage
 export const storage = getStorage(app);
@@ -168,3 +169,307 @@ export async function fetchProjectsFromFirebase(): Promise<any[]> {
     return [];
   }
 }
+
+// Initialize Auth
+export const auth = getAuth(app);
+
+const provider = new GoogleAuthProvider();
+// Request Google Sheets scope to read/write spreadsheets
+provider.addScope("https://www.googleapis.com/auth/spreadsheets");
+
+let isSigningIn = false;
+let cachedAccessToken: string | null = null;
+
+export const initAuth = (
+  onAuthSuccess?: (user: User, token: string) => void,
+  onAuthFailure?: () => void
+) => {
+  return onAuthStateChanged(auth, async (user: User | null) => {
+    if (user) {
+      if (cachedAccessToken) {
+        if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
+      } else if (!isSigningIn) {
+        cachedAccessToken = null;
+        if (onAuthFailure) onAuthFailure();
+      }
+    } else {
+      cachedAccessToken = null;
+      if (onAuthFailure) onAuthFailure();
+    }
+  });
+};
+
+export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
+  try {
+    isSigningIn = true;
+    const result = await signInWithPopup(auth, provider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    if (!credential?.accessToken) {
+      throw new Error("Failed to get access token from Firebase Auth");
+    }
+    cachedAccessToken = credential.accessToken;
+    return { user: result.user, accessToken: cachedAccessToken };
+  } catch (error: any) {
+    console.error("Sign in error:", error);
+    throw error;
+  } finally {
+    isSigningIn = false;
+  }
+};
+
+export const getAccessToken = async (): Promise<string | null> => {
+  return cachedAccessToken;
+};
+
+export const logout = async () => {
+  await auth.signOut();
+  cachedAccessToken = null;
+};
+
+// Google Sheets Sync function
+export async function syncToGoogleSheet(
+  surveys: any[],
+  leads: any[],
+  accessToken: string
+): Promise<{ success: boolean; spreadsheetId?: string; spreadsheetUrl?: string; error?: string }> {
+  try {
+    let spreadsheetId = localStorage.getItem("sas_google_spreadsheet_id");
+
+    if (spreadsheetId) {
+      // Validate spreadsheet existence by making a light metadata call
+      const verifyRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=spreadsheetId`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      if (!verifyRes.ok) {
+        console.warn("Stored spreadsheet ID not valid/found. Creating a new one...");
+        spreadsheetId = null;
+      }
+    }
+
+    if (!spreadsheetId) {
+      // Create a beautiful spreadsheet containing separate sheets for Surveys and Leads
+      const createRes = await fetch("https://sheets.googleapis.com/v4/spreadsheets", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          properties: {
+            title: "Shree Adishakti Solar - Portal Bookings"
+          },
+          sheets: [
+            {
+              properties: {
+                title: "Feasibility Surveys",
+                gridProperties: { frozenRowCount: 1 }
+              }
+            },
+            {
+              properties: {
+                title: "Calculator Leads",
+                gridProperties: { frozenRowCount: 1 }
+              }
+            }
+          ]
+        })
+      });
+
+      if (!createRes.ok) {
+        throw new Error(`Failed to create Google Sheet: ${createRes.statusText}`);
+      }
+
+      const sheetData = await createRes.json();
+      spreadsheetId = sheetData.spreadsheetId;
+      if (spreadsheetId) {
+        localStorage.setItem("sas_google_spreadsheet_id", spreadsheetId);
+      } else {
+        throw new Error("No spreadsheetId returned from Sheets API");
+      }
+    }
+
+    // Prepare data rows
+    const surveyRows = [
+      [
+        "Date Booked",
+        "Client Name",
+        "Phone Number",
+        "Email Address",
+        "City",
+        "Address",
+        "Capacity (kW)",
+        "Preferred Brand",
+        "Pipeline Step",
+        "Status",
+        "Additional Notes"
+      ],
+      ...surveys.map((s) => [
+        s.createdAt ? s.createdAt.split("T")[0] : "",
+        s.name || "",
+        s.phone || "",
+        s.email || "",
+        s.city || "",
+        s.address || "",
+        s.capacityQuote || "3",
+        s.brandQuote || "Tata Power Solar",
+        `Step ${s.progressStep || 1}/5`,
+        s.status || "Scheduled",
+        s.notes || ""
+      ])
+    ];
+
+    const leadRows = [
+      [
+        "Date Submitted",
+        "Lead Contact Name",
+        "Email Address",
+        "Phone Number",
+        "Monthly Units (kWh)",
+        "Monthly Bill (₹)",
+        "Recommended Capacity (kWp)",
+        "Estimated Cost (₹)",
+        "Brand Selection",
+        "System Setup Type",
+        "Status"
+      ],
+      ...leads.map((l) => [
+        l.createdAt ? l.createdAt.split("T")[0] : "",
+        l.name || "",
+        l.email || "",
+        l.phone || "",
+        l.monthlyUnits || "",
+        l.electricityBill || "",
+        l.recommendedCapacity || "",
+        l.estimatedCost || l.estimatedInvestment || "",
+        l.brandPreference || "",
+        l.systemType || "",
+        l.status || "Pending Contact"
+      ])
+    ];
+
+    // Write to both sheets in the spreadsheet
+    const writeData = async (range: string, values: any[][]) => {
+      const res = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`,
+        {
+          method: "PUT",
+          headers: {
+            "Authorization": `Bearer ${accessToken}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            range,
+            majorDimension: "ROWS",
+            values
+          })
+        }
+      );
+      if (!res.ok) {
+        throw new Error(`Failed to update range ${range}: ${res.statusText}`);
+      }
+    };
+
+    // Update both tables (ensure sheets are properly filled)
+    await writeData("'Feasibility Surveys'!A1:K" + surveyRows.length, surveyRows);
+    await writeData("'Calculator Leads'!A1:K" + leadRows.length, leadRows);
+
+    return {
+      success: true,
+      spreadsheetId,
+      spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`
+    };
+  } catch (error: any) {
+    console.error("Google Sheets sync failed:", error);
+    return {
+      success: false,
+      error: error.message || String(error)
+    };
+  }
+}
+
+/**
+ * Saves a lead record to Firestore
+ */
+export async function saveLeadToFirebase(lead: any): Promise<any> {
+  try {
+    const docData = {
+      ...lead,
+      createdAt: lead.createdAt || new Date().toISOString()
+    };
+    const docRef = await addDoc(collection(db, "leads"), docData);
+    return { id: docRef.id, ...docData };
+  } catch (err: any) {
+    console.error("Error saving lead to Firebase:", err);
+    throw err;
+  }
+}
+
+/**
+ * Fetches all leads from Firestore
+ */
+export async function fetchLeadsFromFirebase(): Promise<any[]> {
+  try {
+    const q = query(collection(db, "leads"), orderBy("createdAt", "desc"));
+    const querySnapshot = await getDocs(q);
+    const leads: any[] = [];
+    querySnapshot.forEach((doc) => {
+      leads.push({ id: doc.id, ...doc.data() });
+    });
+    return leads;
+  } catch (err) {
+    console.error("Error fetching leads from Firebase:", err);
+    return [];
+  }
+}
+
+/**
+ * Saves a survey record to Firestore
+ */
+export async function saveSurveyToFirebase(survey: any): Promise<any> {
+  try {
+    const docData = {
+      ...survey,
+      progressStep: survey.progressStep || 1,
+      status: survey.status || "Scheduled",
+      createdAt: survey.createdAt || new Date().toISOString()
+    };
+    const docRef = await addDoc(collection(db, "surveys"), docData);
+    return { id: docRef.id, ...docData };
+  } catch (err: any) {
+    console.error("Error saving survey to Firebase:", err);
+    throw err;
+  }
+}
+
+/**
+ * Fetches all surveys from Firestore
+ */
+export async function fetchSurveysFromFirebase(): Promise<any[]> {
+  try {
+    const q = query(collection(db, "surveys"), orderBy("createdAt", "desc"));
+    const querySnapshot = await getDocs(q);
+    const surveys: any[] = [];
+    querySnapshot.forEach((doc) => {
+      surveys.push({ id: doc.id, ...doc.data() });
+    });
+    return surveys;
+  } catch (err) {
+    console.error("Error fetching surveys from Firebase:", err);
+    return [];
+  }
+}
+
+/**
+ * Updates a survey's progress step in Firestore
+ */
+export async function updateSurveyStepInFirebase(id: string, step: number): Promise<boolean> {
+  try {
+    const docRef = doc(db, "surveys", id);
+    await updateDoc(docRef, { progressStep: step });
+    return true;
+  } catch (err) {
+    console.error("Error updating survey step in Firebase:", err);
+    return false;
+  }
+}
+

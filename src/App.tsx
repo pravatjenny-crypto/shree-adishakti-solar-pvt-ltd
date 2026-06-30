@@ -34,7 +34,9 @@ import {
   Clock,
   Wrench,
   Mail,
-  AlertTriangle
+  AlertTriangle,
+  FileSpreadsheet,
+  ExternalLink
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
@@ -52,7 +54,19 @@ import {
 import { BRANDS, PRODUCTS, FAQS, PROJECT_GALLERY } from "./data";
 import { Lead, Survey, ChatMessage } from "./types";
 import Logo from "./components/Logo";
-import { saveProjectToFirebase, fetchProjectsFromFirebase } from "./lib/firebase";
+import { 
+  saveProjectToFirebase, 
+  fetchProjectsFromFirebase, 
+  initAuth, 
+  googleSignIn, 
+  logout, 
+  syncToGoogleSheet,
+  saveLeadToFirebase,
+  fetchLeadsFromFirebase,
+  saveSurveyToFirebase,
+  fetchSurveysFromFirebase,
+  updateSurveyStepInFirebase
+} from "./lib/firebase";
 
 const EXECUTION_STEPS = [
   {
@@ -346,6 +360,12 @@ export default function App() {
   const [editingSurveyStep, setEditingSurveyStep] = useState<number>(1);
   const [pricingMultiplier, setPricingMultiplier] = useState(1.0); // Manage price variables
 
+  // Google Sheets state
+  const [googleUser, setGoogleUser] = useState<any>(null);
+  const [googleToken, setGoogleToken] = useState<string | null>(null);
+  const [isSyncingSheets, setIsSyncingSheets] = useState(false);
+  const [syncSheetsResult, setSyncSheetsResult] = useState<{ success: boolean; spreadsheetUrl?: string; error?: string } | null>(null);
+
   // Calculator inputs
   const [monthlyBill, setMonthlyBill] = useState(3500);
   const [monthlyUnits, setMonthlyUnits] = useState(420);
@@ -488,6 +508,19 @@ export default function App() {
   useEffect(() => {
     fetchLeadsAndSurveys();
     fetchProjects();
+    const unsubscribe = initAuth(
+      (user, token) => {
+        setGoogleUser(user);
+        setGoogleToken(token);
+      },
+      () => {
+        setGoogleUser(null);
+        setGoogleToken(null);
+      }
+    );
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
   const fetchProjects = async () => {
@@ -520,18 +553,121 @@ export default function App() {
 
   const fetchLeadsAndSurveys = async () => {
     try {
-      const lRes = await fetch("/api/leads");
-      if (lRes.ok) {
-        const data = await lRes.json();
-        setLeadsList(data);
+      const firebaseLeads = await fetchLeadsFromFirebase();
+      const firebaseSurveys = await fetchSurveysFromFirebase();
+      
+      setLeadsList(firebaseLeads);
+      setSurveysList(firebaseSurveys);
+
+      // Support fetching from backend API as fallback / dual sync
+      if (firebaseLeads.length === 0) {
+        try {
+          const lRes = await fetch("/api/leads");
+          if (lRes.ok) {
+            const data = await lRes.json();
+            setLeadsList(data);
+          }
+        } catch (_) {}
       }
-      const sRes = await fetch("/api/surveys");
-      if (sRes.ok) {
-        const data = await sRes.json();
-        setSurveysList(data);
+      if (firebaseSurveys.length === 0) {
+        try {
+          const sRes = await fetch("/api/surveys");
+          if (sRes.ok) {
+            const data = await sRes.json();
+            setSurveysList(data);
+          }
+        } catch (_) {}
       }
     } catch (err) {
-      console.warn("Could not load database records. Using static mock databases.");
+      console.warn("Could not load database records from Firebase. Using static mock databases.", err);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    try {
+      const res = await googleSignIn();
+      if (res) {
+        setGoogleUser(res.user);
+        setGoogleToken(res.accessToken);
+        setSyncSheetsResult(null);
+      }
+    } catch (err: any) {
+      console.error("Google login failed:", err);
+      alert("Failed to sign in with Google: " + (err.message || String(err)));
+    }
+  };
+
+  const handleGoogleLogout = async () => {
+    try {
+      await logout();
+      setGoogleUser(null);
+      setGoogleToken(null);
+      setSyncSheetsResult(null);
+    } catch (err: any) {
+      console.error("Logout failed:", err);
+    }
+  };
+
+  const handleSyncToSheets = async () => {
+    if (!googleToken) {
+      alert("Please sign in with Google first.");
+      return;
+    }
+    
+    // Explicit user confirmation for mutative workspace operations (MANDATORY)
+    const totalCount = leadsList.length + surveysList.length + 2; // Including demo seed leads
+    const confirmed = window.confirm(
+      `Synchronize all (${totalCount}) booking requests & calculator leads directly into Google Sheets? This will update your 'Shree Adishakti Solar - Portal Bookings' spreadsheet.`
+    );
+    if (!confirmed) return;
+
+    setIsSyncingSheets(true);
+    setSyncSheetsResult(null);
+    try {
+      // Merge in the static demo items as well to make it comprehensive
+      const allSurveys = [
+        {
+          createdAt: "2026-06-29T12:00:00.000Z",
+          name: "Pravat Kumar Jena",
+          phone: "94370 12345",
+          email: "pravatjenny@gmail.com",
+          city: "Bhubaneswar",
+          address: "Plot 42, Sahid Nagar, Bhubaneswar, Odisha",
+          capacityQuote: "4.5",
+          brandQuote: "Waaree",
+          progressStep: 3,
+          status: "Feasibility Audit"
+        },
+        ...surveysList
+      ];
+
+      const allLeads = [
+        {
+          createdAt: "2026-06-29T10:30:00.000Z",
+          name: "Debasish Mohanty",
+          email: "deb@gmail.com",
+          phone: "9861001234",
+          monthlyUnits: "550",
+          electricityBill: "4500",
+          recommendedCapacity: "4.6",
+          estimatedInvestment: "354200",
+          brandPreference: "Adani",
+          systemType: "Hybrid",
+          status: "Pending Contact"
+        },
+        ...leadsList
+      ];
+
+      const result = await syncToGoogleSheet(allSurveys, allLeads, googleToken);
+      setSyncSheetsResult(result);
+    } catch (err: any) {
+      console.error("Sheets sync failed:", err);
+      setSyncSheetsResult({
+        success: false,
+        error: err.message || String(err)
+      });
+    } finally {
+      setIsSyncingSheets(false);
     }
   };
 
@@ -556,15 +692,20 @@ export default function App() {
     };
 
     try {
-      const res = await fetch("/api/leads", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      if (res.ok) {
-        setLeadSubmitted(true);
-        fetchLeadsAndSurveys();
-      }
+      // Save directly to Firebase Firestore first
+      await saveLeadToFirebase(payload);
+
+      // Try dual sync with backend API as well
+      try {
+        await fetch("/api/leads", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+      } catch (_) {}
+
+      setLeadSubmitted(true);
+      fetchLeadsAndSurveys();
     } catch (err) {
       console.error(err);
       setLeadSubmitted(true); // fall-back UX
@@ -586,20 +727,27 @@ export default function App() {
     };
 
     try {
-      const res = await fetch("/api/surveys", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSurveyEmailStatus({
-          sent: data.emailSent,
-          error: data.emailError
+      // Save directly to Firebase Firestore first
+      await saveSurveyToFirebase(payload);
+
+      // Try dual sync with backend API for automatic emails
+      try {
+        const res = await fetch("/api/surveys", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
         });
-        setSurveyBooked(true);
-        fetchLeadsAndSurveys();
-      }
+        if (res.ok) {
+          const data = await res.json();
+          setSurveyEmailStatus({
+            sent: data.emailSent,
+            error: data.emailError
+          });
+        }
+      } catch (_) {}
+
+      setSurveyBooked(true);
+      fetchLeadsAndSurveys();
     } catch (err: any) {
       console.error(err);
       setSurveyEmailStatus({
@@ -648,15 +796,20 @@ export default function App() {
   // Admin Step Update
   const updateSurveyStep = async (id: string, step: number) => {
     try {
-      const res = await fetch(`/api/surveys/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ progressStep: step })
-      });
-      if (res.ok) {
-        setEditingSurveyId(null);
-        fetchLeadsAndSurveys();
-      }
+      // First update in Firebase Firestore
+      await updateSurveyStepInFirebase(id, step);
+
+      // Try dual-sync with backend API as well
+      try {
+        await fetch(`/api/surveys/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ progressStep: step })
+        });
+      } catch (_) {}
+
+      setEditingSurveyId(null);
+      fetchLeadsAndSurveys();
     } catch (err) {
       console.error(err);
     }
@@ -3599,6 +3752,114 @@ export default function App() {
                           <CheckCircle size={10} className="mr-1" /> ACTIVE
                         </span>
                       </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Google Sheets Booking Sync Desk */}
+                <div className="bg-white p-6 rounded-3xl border border-slate-200 space-y-6 shadow-md">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                    <div className="flex items-center space-x-2">
+                      <Database size={18} className="text-emerald-600" />
+                      <h3 className="text-sm font-bold uppercase tracking-wider text-slate-900">Google Sheets CRM Integration</h3>
+                    </div>
+                    {googleUser && (
+                      <button 
+                        onClick={handleGoogleLogout}
+                        className="text-[10px] text-slate-500 hover:text-red-600 font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                      >
+                        Disconnect Account
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                    <div className="space-y-2">
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        Export and synchronize all calculator leads and feasibility site survey bookings in real-time. This creates/updates a dual-tab spreadsheet 
+                        named <strong className="text-slate-900">"Shree Adishakti Solar - Portal Bookings"</strong> inside your Google Drive with full client and technical specifications.
+                      </p>
+                      {googleUser ? (
+                        <div className="flex items-center space-x-2 pt-1">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                          <span className="text-[11px] text-slate-500 font-medium">
+                            Connected: <strong className="text-slate-700">{googleUser.email}</strong>
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-slate-500 flex items-center space-x-1 pt-1">
+                          <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                          <span>Authorization required to create or modify spreadsheets.</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col space-y-3 justify-center">
+                      {!googleUser ? (
+                        <button
+                          onClick={handleGoogleLogin}
+                          className="w-full sm:w-auto self-center md:self-end flex items-center justify-center space-x-3 cursor-pointer bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                        >
+                          <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" style={{ display: "block", width: "16px", height: "16px" }}>
+                            <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
+                            <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
+                            <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
+                            <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
+                          </svg>
+                          <span className="font-sans font-bold tracking-tight">Connect Google Sheets</span>
+                        </button>
+                      ) : (
+                        <div className="space-y-3 self-center md:self-end w-full max-w-sm">
+                          <button
+                            onClick={handleSyncToSheets}
+                            disabled={isSyncingSheets}
+                            className={`w-full py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center space-x-2 cursor-pointer ${
+                              isSyncingSheets 
+                                ? "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200" 
+                                : "bg-emerald-600 text-white hover:bg-emerald-700 shadow-md shadow-emerald-600/10"
+                            }`}
+                          >
+                            {isSyncingSheets ? (
+                              <>
+                                <span className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-slate-300 border-t-slate-600 mr-2"></span>
+                                Synchronizing Bookings...
+                              </>
+                            ) : (
+                              <>
+                                <FileSpreadsheet size={14} />
+                                <span>Sync Bookings to Google Sheets</span>
+                              </>
+                            )}
+                          </button>
+
+                          {syncSheetsResult && (
+                            <div className={`p-3 rounded-xl border text-center transition-all ${
+                              syncSheetsResult.success 
+                                ? "bg-emerald-50 border-emerald-200 text-emerald-800" 
+                                : "bg-red-50 border-red-200 text-red-800"
+                            }`}>
+                              {syncSheetsResult.success ? (
+                                <div className="space-y-1.5 text-xs">
+                                  <span className="font-bold block text-[11px] uppercase tracking-wide">☀️ Sync Successful!</span>
+                                  <a 
+                                    href={syncSheetsResult.spreadsheetUrl} 
+                                    target="_blank" 
+                                    rel="noreferrer"
+                                    className="inline-flex items-center text-sky-600 hover:text-sky-800 hover:underline font-bold"
+                                  >
+                                    Open Spreadsheet <ExternalLink size={11} className="ml-1" />
+                                  </a>
+                                </div>
+                              ) : (
+                                <div className="text-[11px]">
+                                  <span className="font-bold block uppercase tracking-wide">❌ Sync Failed</span>
+                                  <span className="text-slate-600 text-[10px]">{syncSheetsResult.error}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

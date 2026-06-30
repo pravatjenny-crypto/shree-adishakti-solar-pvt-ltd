@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useState } from "react";
 // @ts-ignore
 import logoImg from "../assets/images/shree_adishakti_solar_logo_1782724405534.jpg";
+import { Sun } from "lucide-react";
 
 interface LogoProps {
   className?: string;
@@ -16,17 +17,25 @@ export default function Logo({
   variant = "light"
 }: LogoProps) {
   const isDark = variant === "dark";
+  const [imgError, setImgError] = useState(false);
 
   return (
     <div className={`flex items-center space-x-2.5 sm:space-x-3 select-none py-1 ${className}`}>
       {/* Authentic Company Logo Image - Full, uncropped, contain-fit */}
       <div className="shrink-0 flex items-center justify-center">
-        <img
-          src={logoImg}
-          alt="Shree Adishakti Solar"
-          className="h-[40px] xs:h-[45px] sm:h-[50px] md:h-[55px] lg:h-[60px] w-auto object-contain mix-blend-multiply transition-transform duration-300 hover:scale-[1.02]"
-          referrerPolicy="no-referrer"
-        />
+        {!imgError ? (
+          <img
+            src={logoImg}
+            alt="Shree Adishakti Solar"
+            className="h-[40px] xs:h-[45px] sm:h-[50px] md:h-[55px] lg:h-[60px] w-auto object-contain transition-transform duration-300 hover:scale-[1.02]"
+            referrerPolicy="no-referrer"
+            onError={() => setImgError(true)}
+          />
+        ) : (
+          <div className="h-[40px] w-[40px] xs:h-[45px] xs:w-[45px] sm:h-[50px] sm:w-[50px] md:h-[55px] md:w-[55px] lg:h-[60px] lg:w-[60px] rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-500 shadow-inner">
+            <Sun className="h-5 w-5 sm:h-6 sm:w-6 animate-pulse" />
+          </div>
+        )}
       </div>
 
       {/* Restored Brand Text Label */}
